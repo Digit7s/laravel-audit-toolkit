@@ -1,0 +1,21 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 5
+    paths:
+        - src
+        - tests
+    tmpDir: .phpstan-cache
+    treatPhpDocTypesAsCertain: false
+    # Pest's fluent test DSL adds these members dynamically at runtime.
+    # Keep the exceptions exact and limited to tests; package source remains unsuppressed.
+    ignoreErrors:
+        -
+            message: '#Call to an undefined method Pest\\PendingCalls\\TestCall::actingAs\(\)\.#'
+            paths:
+                - tests
+        -
+            message: '#Access to an undefined property Pest\\PendingCalls\\TestCall::\$app.#'
+            paths:
+                - tests

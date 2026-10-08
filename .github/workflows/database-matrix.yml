@@ -1,0 +1,68 @@
+name: Audit toolkit database matrix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - driver: sqlite
+            php: '8.5'
+          - driver: mysql
+            php: '8.5'
+          - driver: pgsql
+            php: '8.5'
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: audit_toolkit_test
+          MYSQL_USER: audit_test
+          MYSQL_PASSWORD: audit_test_password
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: audit_test
+          POSTGRES_PASSWORD: audit_test_password
+          POSTGRES_DB: audit_toolkit_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd="pg_isready -U audit_test -d audit_toolkit_test"
+          --health-interval=10s --health-timeout=5s --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: pdo_sqlite, pdo_mysql, pdo_pgsql
+          coverage: none
+      - name: Create isolated secondary database
+        if: matrix.driver == 'mysql'
+        run: >-
+          mysql -h 127.0.0.1 -uroot -proot -e
+          "CREATE DATABASE audit_toolkit_test_secondary;
+          GRANT ALL PRIVILEGES ON audit_toolkit_test_secondary.*
+          TO 'audit_test'@'%'; FLUSH PRIVILEGES;"
+      - name: Create isolated secondary database
+        if: matrix.driver == 'pgsql'
+        env:
+          PGPASSWORD: audit_test_password
+        run: createdb -h 127.0.0.1 -U audit_test audit_toolkit_test_secondary
+      - run: composer install --no-interaction --prefer-dist
+      - name: Run static analysis
+        run: composer analyse
+      - name: Run package suite
+        env:
+          AUDIT_TEST_DB_DRIVER: ${{ matrix.driver }}
+          AUDIT_TEST_DB_USERNAME: audit_test
+          AUDIT_TEST_DB_PASSWORD: audit_test_password
+        run: composer test
