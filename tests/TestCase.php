@@ -68,9 +68,9 @@ abstract class TestCase extends Orchestra
 
         if (Schema::hasTable('audit_events')) {
             DB::connection('testing')->table('audit_events')->delete();
+        } else {
+            $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
         }
-
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         Schema::create('audit_test_users', function (Blueprint $table): void {
             $table->id();
