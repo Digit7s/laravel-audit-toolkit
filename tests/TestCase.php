@@ -5,6 +5,7 @@ namespace Digit7s\AuditToolkit\Tests;
 use Digit7s\AuditToolkit\AuditServiceProvider;
 use Digit7s\AuditToolkit\Tests\Fixtures\TestUser;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as Orchestra;
 
@@ -56,6 +57,19 @@ abstract class TestCase extends Orchestra
 
     protected function defineDatabaseMigrations(): void
     {
+        foreach ([
+            'audit_test_soft_subjects',
+            'audit_test_auditable_subjects',
+            'audit_test_subjects',
+            'audit_test_users',
+        ] as $table) {
+            Schema::dropIfExists($table);
+        }
+
+        if (Schema::hasTable('audit_events')) {
+            DB::connection('testing')->table('audit_events')->delete();
+        }
+
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         Schema::create('audit_test_users', function (Blueprint $table): void {
@@ -91,6 +105,9 @@ abstract class TestCase extends Orchestra
         });
 
         $secondary = Schema::connection('secondary');
+        $secondary->dropIfExists('audit_test_auditable_subjects');
+        $secondary->dropIfExists('audit_events');
+
         $secondary->create('audit_events', function (Blueprint $table): void {
             $table->ulid('id')->primary();
             $table->string('event', 150);
