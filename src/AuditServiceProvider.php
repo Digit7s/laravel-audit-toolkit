@@ -43,6 +43,16 @@ class AuditServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
+        if ($this->app->runningInConsole()) {
+            $this->publishes([
+                __DIR__.'/../config/audit-toolkit.php' => config_path('audit-toolkit.php'),
+            ], 'audit-toolkit-config');
+
+            $this->publishesMigrations([
+                __DIR__.'/../database/migrations' => database_path('migrations'),
+            ], 'audit-toolkit-migrations');
+        }
+
         if ((bool) config('audit-toolkit.authentication.enabled', false)) {
             $this->app->make(AuthenticationAuditListener::class)->subscribe($this->app['events']);
         }

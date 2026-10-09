@@ -8,12 +8,41 @@ This package provides explicit recording and opt-in Eloquent lifecycle auditing.
 
 ## Installation
 
+The package is currently an unpublished release-candidate development line. For a controlled pilot, resolve it from GitHub explicitly:
+
+```bash
+composer config repositories.digit7s-audit-toolkit vcs https://github.com/Digit7s/laravel-audit-toolkit.git
+composer require 'digit7s/laravel-audit-toolkit:dev-main as 0.1.0'
+```
+
+After a tagged and published release, the normal command will be:
+
 ```bash
 composer require digit7s/laravel-audit-toolkit
+```
+
+Then publish the package-owned configuration and migrations and migrate:
+
+```bash
+php artisan vendor:publish --tag=audit-toolkit-config
+php artisan vendor:publish --tag=audit-toolkit-migrations
 php artisan migrate
 ```
 
 The service provider is discovered automatically by Laravel.
+
+## Configuration
+
+The default configuration is privacy-first and fail-closed. Publish `config/audit-toolkit.php` before changing defaults. The main controls are:
+
+- `failure_mode`: `fail_closed` rolls back or rejects an audit write when persistence fails; `fail_open` is only appropriate for explicitly best-effort telemetry.
+- `privacy.values_allowed_keys`: global value allowlist used when an event does not provide `allowedValueKeys`.
+- `privacy.metadata_allowed_keys`: metadata allowlist.
+- `context.guard_priority`: ordered guards used for actor resolution; ambiguous active guards remain unresolved.
+- `context.include_ip` and `context.include_user_agent`: disabled by default.
+- `authentication.enabled` and `authentication.events`: disabled by default; enable only reviewed native Laravel events.
+
+Configuration changes do not make excluded values recoverable. Host authorization is still required for audit readers and Filament views.
 
 ## Recording an event
 
@@ -158,6 +187,14 @@ The package requires PHP `^8.5` and Illuminate 13. Phase 4 uses Larastan 3.13 wi
 The optional `composer benchmark` command runs against disposable in-memory SQLite data. Set `AUDIT_BENCHMARK_EVENTS=1000`, `10000`, or `100000` to choose the synthetic volume. Its results are local SQLite baselines only. The manual `.github/workflows/database-matrix.yml` workflow is the compatibility path for isolated MySQL 8.4 and PostgreSQL 16 verification; workflow configuration is not itself compatibility evidence.
 
 This is a controlled-pilot development line, not a production-readiness or compliance certification. See [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+
+## Troubleshooting
+
+- If the audit table is missing, publish the migrations and run `php artisan migrate`.
+- If a VCS installation cannot satisfy `digit7s/laravel-audit-toolkit:^0.1`, use the documented `dev-main as 0.1.0` alias until a `0.1.x` tag is published.
+- If an actor is unexpectedly anonymous, review the configured guard priority and ensure the host guard has an authenticated user.
+- If values are absent, check the event allowlist and the published privacy configuration; sensitive-looking keys are intentionally redacted.
+- If Filament pages are forbidden, configure every panel's authorization callbacks explicitly; navigation visibility is not authorization.
 
 ## License
 

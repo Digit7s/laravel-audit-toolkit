@@ -2,6 +2,17 @@
     "$schema": "https://getcomposer.org/schema.json",
     "name": "digit7s/laravel-audit-toolkit",
     "description": "A Laravel-native, privacy-conscious audit event recorder and read API.",
+    "keywords": [
+        "laravel",
+        "audit-log",
+        "audit-trail",
+        "privacy",
+        "eloquent"
+    ],
+    "homepage": "https://github.com/Digit7s/laravel-audit-toolkit",
+    "support": {
+        "issues": "https://github.com/Digit7s/laravel-audit-toolkit/issues"
+    },
     "type": "library",
     "license": "MIT",
     "authors": [
