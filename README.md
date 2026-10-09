@@ -1,27 +1,32 @@
 # Laravel Audit Toolkit
 
-`digit7s/laravel-audit-toolkit` is a Laravel-native audit event recorder with conservative privacy defaults and a read-oriented query API.
+`digit7s/laravel-audit-toolkit` is a Laravel-native audit engine for synchronous event recording, opt-in Eloquent lifecycle auditing, privacy-first value capture, and read-only queries. Filament is not required.
 
-## Status
+## Features
 
-This package provides explicit recording and opt-in Eloquent lifecycle auditing. Audit writes remain synchronous; the optional queue integration propagates attribution context only and never queues audit persistence.
+- Explicit business-event recording through `audit()->recordEvent()`.
+- Opt-in `Digit7s\AuditToolkit\Concerns\Auditable` model auditing.
+- Allowlist-first values and metadata with recursive sensitive-key filtering.
+- Actor, subject, guard, request, correlation, batch, and impersonation attribution.
+- Synchronous persistence with configurable fail-closed or explicitly best-effort fail-open behavior.
+- Safe, explicit queue-context propagation without serializing models, credentials, or request payloads.
+- A read-only `AuditQuery` contract for administration and reporting interfaces.
+
+## Requirements
+
+- PHP `^8.5`
+- Laravel / Illuminate `^13.0`
+- SQLite, MySQL 8.4, and PostgreSQL 16 are verified in the package's GitHub Actions database matrix.
 
 ## Installation
 
-The package is currently an unpublished release-candidate development line. For a controlled pilot, resolve it from GitHub explicitly:
-
-```bash
-composer config repositories.digit7s-audit-toolkit vcs https://github.com/Digit7s/laravel-audit-toolkit.git
-composer require 'digit7s/laravel-audit-toolkit:dev-main as 0.1.0'
-```
-
-After a tagged and published release, the normal command will be:
+Install the stable package from Packagist:
 
 ```bash
 composer require digit7s/laravel-audit-toolkit
 ```
 
-Then publish the package-owned configuration and migrations and migrate:
+Publish the package configuration and migrations, then migrate:
 
 ```bash
 php artisan vendor:publish --tag=audit-toolkit-config
@@ -29,25 +34,18 @@ php artisan vendor:publish --tag=audit-toolkit-migrations
 php artisan migrate
 ```
 
-The service provider is discovered automatically by Laravel.
+Laravel discovers `Digit7s\AuditToolkit\AuditServiceProvider` automatically. The migration creates the `audit_events` table, including original-actor attribution columns.
 
-## Configuration
+For development against an unreleased checkout, use a temporary VCS repository and a development alias. This is not needed for the tagged release:
 
-The default configuration is privacy-first and fail-closed. Publish `config/audit-toolkit.php` before changing defaults. The main controls are:
+```bash
+composer config repositories.digit7s-audit-toolkit vcs https://github.com/Digit7s/laravel-audit-toolkit.git
+composer require 'digit7s/laravel-audit-toolkit:dev-main as 0.1.0'
+```
 
-- `failure_mode`: `fail_closed` rolls back or rejects an audit write when persistence fails; `fail_open` is only appropriate for explicitly best-effort telemetry.
-- `privacy.values_allowed_keys`: global value allowlist used when an event does not provide `allowedValueKeys`.
-- `privacy.metadata_allowed_keys`: metadata allowlist.
-- `context.guard_priority`: ordered guards used for actor resolution; ambiguous active guards remain unresolved.
-- `context.include_ip` and `context.include_user_agent`: disabled by default.
-- `authentication.enabled` and `authentication.events`: disabled by default; enable only reviewed native Laravel events.
-
-Configuration changes do not make excluded values recoverable. Host authorization is still required for audit readers and Filament views.
-
-## Recording an event
+## Quick Start
 
 ```php
-use App\Models\Order;
 use Illuminate\Support\Facades\Auth;
 
 audit()->recordEvent(
@@ -62,15 +60,19 @@ audit()->recordEvent(
 );
 ```
 
-Anonymous and system events are supported by omitting actor and subject. Writes are synchronous and use the active database transaction. The default failure mode is `fail_closed`; configure `audit-toolkit.failure_mode` to `fail_open` only for explicitly best-effort telemetry.
+The `audit()` and `audit_context()` helpers are provided by the package. Anonymous or system events may omit actor and subject. Manual arguments take precedence over resolved execution context.
 
-Manual call arguments win over execution context. When an argument is omitted, the active execution context may supply actor, guard, request/correlation/batch identifiers, and impersonation attribution.
+## Manual Audit Recording
 
-When a subject model is supplied, the recorder selects that model's resolved connection unless `connection` is explicitly provided. For a manual event without a subject, set `connection: 'name'` (or `audit-toolkit.connections.default`) when it must share a business transaction. `connections.strict_atomicity` can be enabled to reject events whose connection is ambiguous. The package never claims atomicity across independent connections.
+`AuditManager::recordEvent()` accepts the event name, actor, subject, before/after values, metadata, category, description, timestamp, source, guard, correlation/batch/request IDs, an explicit value allowlist, connection, original actor, and context-inheritance control. For lower-level composition, use `AuditEventData::make()` with the `AuditRecorder` contract.
 
-## Opt-in model auditing
+Event names are limited to letters, numbers, dots, underscores, colons, and hyphens. UUID context identifiers are validated before persistence. A subject selects its resolved Eloquent connection; a subject-less event can set `connection: 'name'` or `audit-toolkit.connections.default`.
 
-Automatic auditing is never enabled globally. Add the concern and an explicit field allowlist to each model that should be audited:
+Writes are synchronous and use the active transaction. The default `failure_mode` is `fail_closed`, so a persistence failure is raised to the caller. `fail_open` is available only for explicitly best-effort telemetry and returns `null` after logging a warning.
+
+## Automatic Eloquent Auditing
+
+Auditing is opt-in per model:
 
 ```php
 use Digit7s\AuditToolkit\Concerns\Auditable;
@@ -87,33 +89,37 @@ class Post extends Model
 }
 ```
 
-The observer records `model.created`, `model.updated`, `model.deleted`, `model.restored`, and `model.force_deleted`. A soft delete is `model.deleted` with safe metadata `deletion_mode=soft`; a non-soft delete is `hard`; force deletion is `force`. Updates include only meaningful allowlisted changes, and no-op updates are omitted. A create event is still recorded when the allowlist has no populated fields, with an empty before/after set.
+The observer records `model.created`, `model.updated`, `model.deleted`, `model.restored`, and `model.force_deleted`. Soft deletes include safe `deletion_mode` metadata. No-op updates are omitted and only meaningful allowlisted changes are stored.
 
-`saveQuietly()`, `deleteQuietly()`, `restoreQuietly()`, `forceDeleteQuietly()`, and `withoutEvents()` suppress automatic events because they suppress Eloquent model events. Query-builder writes, mass updates/deletes, raw SQL, database cascades, and pivot operations are outside this observer's boundary.
+`saveQuietly()`, `deleteQuietly()`, `restoreQuietly()`, `forceDeleteQuietly()`, and `withoutEvents()` suppress these lifecycle events. Query-builder writes, mass updates/deletes, raw SQL, database cascades, and pivot operations are outside the observer boundary; they are not automatically audited.
 
-## Privacy behavior
+## Field Allowlists and Privacy
 
-Old and new values are allowlist-first. With the default configuration, no value fields are persisted unless `allowedValueKeys` or `audit-toolkit.privacy.values_allowed_keys` is supplied. Sensitive-looking keys are removed recursively after all values have been normalized into a safe intermediate structure. Metadata has its own conservative allowlist. Request bodies, credentials, tokens, and arbitrary model attributes are never captured automatically.
+Value capture is allowlist-first. By default, no old or new value fields are persisted unless `allowedValueKeys` or `audit-toolkit.privacy.values_allowed_keys` is configured. Metadata uses its own allowlist. Sensitive-looking keys are filtered recursively after safe normalization; credentials, tokens, request bodies, arbitrary model attributes, unsupported objects, recursive structures, and unsafe custom cast outputs are not captured.
 
-Allowlist paths use dot notation. `payload.safe` stores only that leaf and traverses `payload` without including unapproved siblings. Allowing `payload` stores all recursively safe children beneath that key. A parent allowlist intentionally takes precedence over narrower child entries.
+Allowlist paths use dot notation. For example, `payload.safe` captures that leaf without unapproved siblings, while allowing `payload` captures all recursively safe children beneath it. Numeric list indexes are traversed transparently; there is no numeric-index wildcard syntax.
 
-Numeric list indexes are transparent while traversing a dotted path, so `payload.items.safe` applies to each list element. A list parent such as `payload.items` includes every recursively safe element; there is no numeric-index wildcard syntax.
+Direct `AuditEvent::create()` is rejected. Events must go through the recorder pipeline.
 
-Automatic values use Eloquent's dirty/original APIs, then pass through the same serializer and recursive sensitive-key filtering as manual events. Supported scalar values, enums, dates, arrays, and JSON casts are normalized safely. Unsupported objects, Eloquent models, relationship values, recursive structures, and unsafe custom cast outputs are rejected; they are never stringified or dumped.
+## Actor and Subject Attribution
 
-Direct `AuditEvent::create()` is rejected; records must use the recorder pipeline.
+`AuditReference` stores stable type/id references for actors and subjects, so deleted models remain identifiable without serializing model instances. A missing actor is intentionally anonymous; the package does not guess a system identity.
 
-## Automatic context
+Model hooks include `auditActor()`, `auditGuard()`, `auditMetadata()`, `auditSource()`, `auditCategory()`, `auditCorrelationId()`, and `auditRequestId()`. Explicit call arguments win over all context resolution.
 
-Automatic events resolve one authenticated actor from the configured guard priority. Set `audit-toolkit.context.guard_priority` when an application has multiple guards. If more than one guard is active, the actor is left unresolved rather than attributed to the wrong user. Console and unauthenticated work is recorded as anonymous/system context. Request and correlation IDs are only stored when they are valid UUIDs from the configured headers. IP and user-agent metadata are disabled by default and can be enabled explicitly.
+## Multi-Guard Authentication
 
-Model hooks such as `auditActor()`, `auditGuard()`, `auditMetadata()`, `auditSource()`, `auditCategory()`, `auditCorrelationId()`, and `auditRequestId()` override resolved values for that model. Manual `recordEvent()` arguments remain explicit and take precedence over any host context. Incoming request headers are accepted only when they are valid UUIDs; arbitrary headers and request bodies are never persisted. HTTP requests generate one package correlation UUID per request when no valid host correlation is supplied; set `context.generate_correlation_id` to `false` to opt out.
+`context.guard_priority` can specify an ordered guard set. If more than one configured guard is authenticated and the identity is ambiguous, the package leaves the actor unresolved rather than attributing the event to the wrong user. Request and correlation headers are accepted only when they contain valid UUIDs. IP and user-agent metadata are disabled by default.
 
-The precedence order is: call-level value, explicit execution-scoped context, configured resolver, safe framework context, then anonymous/system. `request_id` identifies the request when the host supplies a valid value; `correlation_id` groups related work; `batch_id` is an explicit workflow/batch identifier. Generated identifiers are package values, not host-trusted claims.
+## Request and Correlation Context
 
-### Queue context
+The `DefaultAuditContextResolver` safely resolves framework context. HTTP requests can receive one package-generated correlation UUID when no valid host value is supplied. Set `context.generate_correlation_id` to `false` to opt out. `request_id` identifies a request, `correlation_id` groups related work, and `batch_id` is an explicit workflow identifier.
 
-Queue propagation is explicit and safe. Capture a minimal envelope when dispatching and attach the middleware to that job:
+The precedence order is: call-level value, explicit execution-scoped context, configured resolver, safe framework context, then anonymous/system. Generated identifiers are package values, not trusted claims.
+
+## Queue Context Propagation
+
+Queue propagation is explicit and carries only typed actor references and safe identifiers:
 
 ```php
 use Digit7s\AuditToolkit\Queue\AuditContextMiddleware;
@@ -127,11 +133,11 @@ final class RebuildSearchIndex
 }
 ```
 
-The envelope contains typed actor references and safe identifiers only. It never serializes a user/model, token, cookie, session, credential, or request payload. The worker uses `queue` as the current execution source, retains the original source for attribution, and clears the context in `finally`, including failed attempts. Retries receive the same explicitly serialized envelope; a job with no middleware has no inherited audit context.
+The middleware sets `queue` as the current execution source, preserves the original source, and clears its context in `finally`, including failed attempts. A job without this middleware inherits no audit context.
 
-### Authentication events
+## Optional Authentication Auditing
 
-Native authentication listeners are disabled by default. Enable only the Laravel event names your application has reviewed:
+The `AuthenticationAuditListener` is disabled by default. Enable only reviewed native Laravel events in published configuration:
 
 ```php
 'authentication' => [
@@ -140,23 +146,27 @@ Native authentication listeners are disabled by default. Enable only the Laravel
 ],
 ```
 
-Supported native events are `login`, `logout`, `failed`, `password_reset`, `email_verified`, `current_device_logout`, and `other_device_logout`. Failed login records intentionally omit credentials and raw login identifiers and are capped at one per HTTP request by default (`authentication.max_failed_per_request`). Applications may lower this to zero or set a reviewed higher limit for their own rate/volume policy. The package does not replace or deduplicate host listeners, and it does not infer provider-specific security events.
+Supported names are `login`, `logout`, `failed`, `password_reset`, `email_verified`, `current_device_logout`, and `other_device_logout`. Failed-login records omit credentials and raw login identifiers and default to one event per HTTP request. Host-specific security events are not inferred or deduplicated.
 
-### Impersonation attribution
+## Impersonation Attribution
 
-Hosts that already implement account switching can scope attribution without giving the package control of authentication:
+Hosts that already implement account switching can annotate a scope without giving the package control of authentication:
 
 ```php
-audit_context()->withImpersonation($administrator, function () use ($effectiveUser): void {
+audit_context()->withImpersonation($administrator, function () use ($effectiveUser, $order): void {
     audit()->recordEvent('order.approved', actor: $effectiveUser, subject: $order);
 }, $effectiveUser);
 ```
 
-The effective actor remains `actor_*`; the initiating administrator is stored in additive `original_actor_*` columns. Nested scopes restore their parent in `finally`. Start/end actions are explicit host events; the package does not implement account switching or infer impersonation from request input.
+The effective actor remains in `actor_*`; the initiating administrator is stored in `original_actor_*`. Nested scopes restore their parent in `finally`. Account switching and request-input-based impersonation inference are outside this package.
 
-The event model rejects normal update and delete operations through Eloquent, but this is not a database-level immutability guarantee. Database users with write access can still modify or delete rows. Retention and tamper-evidence are future features.
+## Transaction and Connection Behavior
 
-## Querying
+Automatic callbacks run synchronously on the same connection and transaction as the model save when both use that connection. In fail-closed mode, an audit exception can roll back the enclosing business transaction. The package does not claim atomicity across independent connections or distributed transactions. `connections.strict_atomicity` can reject ambiguous manual writes.
+
+## Querying Audit Events
+
+Use the read-only `AuditQuery` contract for administration UIs and reports:
 
 ```php
 use Digit7s\AuditToolkit\Contracts\AuditQuery;
@@ -168,34 +178,36 @@ $events = app(AuditQuery::class)
     ->paginate();
 ```
 
-The query contract is intended for read paths such as administration UIs. It does not provide a mutation API.
+The `AuditEvent` model exposes read relationships and guarded mutation behavior. The package does not provide a mutation API for audit records.
 
-## Scope
+## Configuration
 
-Automatic callbacks run synchronously in the same database connection and transaction as the model save when both use that connection. A fail-closed audit exception can therefore roll back an enclosing business transaction. An after-event outside a transaction cannot undo a business write that has already committed. Cross-connection atomicity is not provided.
+Publish `config/audit-toolkit.php` before changing defaults. Important settings include:
 
-The package deliberately excludes automatic pivot interception, bulk SQL auditing, retention deletion, exports, asynchronous audit persistence, restoration/revert operations, and hash-chain integrity. Eloquent lifecycle records are append-only by model guard, not immutable at the database privilege level. Auth listeners are opt-in as described above. Atomicity is guaranteed only when the audit write and business write use the same database connection; distributed transactions are unsupported.
+- `failure_mode`: `fail_closed` or explicitly best-effort `fail_open`.
+- `connections.default` and `connections.strict_atomicity`.
+- `context.guard_priority`, correlation/request headers, generated correlation IDs, IP, and user-agent capture.
+- `privacy.values_allowed_keys`, `privacy.metadata_allowed_keys`, and `privacy.redacted_value`.
+- `authentication.enabled`, reviewed `authentication.events`, and `authentication.max_failed_per_request`.
 
-## Compatibility
+Configuration cannot recover values excluded at write time. Host authorization is still required for every audit reader, including the optional Filament companion.
 
-The Phase 3 implementation is tested against PHP 8.5.10 in the core Testbench environment, PHP 8.5.5 in the Filament Testbench environment, Laravel/Illuminate 13, Filament 5.9, Livewire 4, and SQLite. PHP 8.4 is installed but not compatible with this package's current PHP `^8.5` constraint, and no running isolated MySQL/PostgreSQL service was available during verification; those engines are not claimed here.
+## Security and Limitations
 
-## Phase 4 verification
+The package is privacy-first but is not a compliance certification. It deliberately does not provide automatic pivot interception, bulk SQL auditing, exports, asynchronous audit persistence, restore/revert operations, retention or pruning UI, or hash-chain tamper evidence.
 
-The package requires PHP `^8.5` and Illuminate 13. Phase 4 uses Larastan 3.13 with PHPStan 2.3 at analysis level 5. Run `composer validate --no-check-publish`, `composer check-platform-reqs`, `composer lint`, `composer analyse`, and `composer test` before a pilot.
+Eloquent guards reject ordinary update and delete operations on stored events, but database-level immutability is not guaranteed. Database principals with write access can still modify or delete rows. Automated retention and pruning are not available in `v0.1.0`; a future release may add controlled, dry-run cleanup with protected event handling.
 
-The optional `composer benchmark` command runs against disposable in-memory SQLite data. Set `AUDIT_BENCHMARK_EVENTS=1000`, `10000`, or `100000` to choose the synthetic volume. Its results are local SQLite baselines only. The manual `.github/workflows/database-matrix.yml` workflow is the compatibility path for isolated MySQL 8.4 and PostgreSQL 16 verification; workflow configuration is not itself compatibility evidence.
+## Database Compatibility
 
-This is a controlled-pilot development line, not a production-readiness or compliance certification. See [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+The package requires PHP 8.5 and Illuminate 13. GitHub Actions verifies the package suite and static analysis on isolated SQLite, MySQL 8.4, and PostgreSQL 16 services. SQLite is also used for local Testbench and benchmark runs. Check the [database matrix workflow](.github/workflows/database-matrix.yml) for the reproducible verification path.
 
-## Troubleshooting
+## Related Filament Plugin
 
-- If the audit table is missing, publish the migrations and run `php artisan migrate`.
-- If a VCS installation cannot satisfy `digit7s/laravel-audit-toolkit:^0.1`, use the documented `dev-main as 0.1.0` alias until a `0.1.x` tag is published.
-- If an actor is unexpectedly anonymous, review the configured guard priority and ensure the host guard has an authenticated user.
-- If values are absent, check the event allowlist and the published privacy configuration; sensitive-looking keys are intentionally redacted.
-- If Filament pages are forbidden, configure every panel's authorization callbacks explicitly; navigation visibility is not authorization.
+For an optional read-only UI, install [`digit7s/filament-audit-toolkit`](https://github.com/Digit7s/filament-audit-toolkit). The Laravel package does not require Filament; it owns recording, privacy, context, storage, and the query contract.
 
-## License
+## Contributing, Security and License
 
-MIT. See [LICENSE](LICENSE).
+Run `composer validate --no-check-publish`, `composer check-platform-reqs`, `composer lint`, `composer analyse`, and `composer test` before submitting changes. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
+
+MIT licensed. See [LICENSE](LICENSE).
