@@ -1,4 +1,4 @@
-# Controlled pilot release checklist
+# Maintainer release checklist
 
 - [ ] Confirm package and dependency constraints against the target Laravel line.
 - [ ] Run Composer validation, platform checks, Pint, Larastan/PHPStan, and the focused suite.

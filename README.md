@@ -1,5 +1,15 @@
 # Laravel Audit Toolkit
 
+
+
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/digit7s/laravel-audit-toolkit.svg?style=flat-square)](https://packagist.org/packages/digit7s/laravel-audit-toolkit)
+[![Total Downloads](https://img.shields.io/packagist/dt/digit7s/laravel-audit-toolkit.svg?style=flat-square)](https://packagist.org/packages/digit7s/laravel-audit-toolkit)
+[![PHP Version](https://img.shields.io/packagist/php-v/digit7s/laravel-audit-toolkit.svg?style=flat-square)](https://packagist.org/packages/digit7s/laravel-audit-toolkit)
+[![Database Matrix](https://github.com/Digit7s/laravel-audit-toolkit/actions/workflows/database-matrix.yml/badge.svg)](https://github.com/Digit7s/laravel-audit-toolkit/actions/workflows/database-matrix.yml)
+[![License](https://img.shields.io/packagist/l/digit7s/laravel-audit-toolkit.svg?style=flat-square)](LICENSE)
+
+
+
 `digit7s/laravel-audit-toolkit` is a Laravel-native audit engine for synchronous event recording, opt-in Eloquent lifecycle auditing, privacy-first value capture, and read-only queries. Filament is not required.
 
 ## Features
@@ -36,12 +46,7 @@ php artisan migrate
 
 Laravel discovers `Digit7s\AuditToolkit\AuditServiceProvider` automatically. The migration creates the `audit_events` table, including original-actor attribution columns.
 
-For development against an unreleased checkout, use a temporary VCS repository and a development alias. This is not needed for the tagged release:
-
-```bash
-composer config repositories.digit7s-audit-toolkit vcs https://github.com/Digit7s/laravel-audit-toolkit.git
-composer require 'digit7s/laravel-audit-toolkit:dev-main as 0.1.0'
-```
+For unreleased checkout and sibling-package development, see [CONTRIBUTING.md](CONTRIBUTING.md). Those workflows are not required for normal Packagist installation.
 
 ## Quick Start
 
