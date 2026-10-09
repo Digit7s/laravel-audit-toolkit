@@ -48,7 +48,7 @@ class AuditServiceProvider extends ServiceProvider
                 __DIR__.'/../config/audit-toolkit.php' => config_path('audit-toolkit.php'),
             ], 'audit-toolkit-config');
 
-            $this->publishesMigrations([
+            $this->publishes([
                 __DIR__.'/../database/migrations' => database_path('migrations'),
             ], 'audit-toolkit-migrations');
         }
